@@ -1,0 +1,16 @@
+{
+  "name": "hearth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A tiny household operating board for a family of five. Node built-ins only.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "lint": "node --check server.mjs && node --check lib/store.mjs && node --check lib/validate.mjs"
+  }
+}

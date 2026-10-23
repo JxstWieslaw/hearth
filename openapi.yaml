@@ -1,0 +1,487 @@
+openapi: 3.1.0
+info:
+  title: Hearth API
+  version: 0.1.0
+  summary: Household operating board for one family on one home network.
+  description: |
+    JSON API under /api served by a single zero-dependency Node 22 process.
+    Default bind is 127.0.0.1:4317; set HOST=0.0.0.0 to reach it from phones on the LAN.
+    There is no authentication: the trust boundary is the home Wi-Fi (see docs/SPEC.md section 8).
+    Every mutation triggers one `event: state` broadcast on GET /api/events.
+servers:
+  - url: http://127.0.0.1:4317
+    description: Local default
+tags:
+  - name: state
+  - name: chores
+  - name: shopping
+  - name: events
+paths:
+  /api/state:
+    get:
+      tags: [state]
+      summary: Current full state
+      operationId: getState
+      responses:
+        "200":
+          description: The complete board state, including the derived week block.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/State"
+  /api/chores:
+    post:
+      tags: [chores]
+      summary: Create a chore
+      operationId: createChore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChore"
+      responses:
+        "201":
+          description: Chore created with status `todo`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chore"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+  /api/chores/rotate:
+    post:
+      tags: [chores]
+      summary: Reassign all open chores lowest-total-first
+      description: |
+        Pure function over the current state. Open chores are sorted by points descending and
+        each is given to the member with the lowest running weekly total (tie: fewest open chores,
+        then seed order). Running totals start at this week's points.
+      operationId: rotateChores
+      responses:
+        "200":
+          description: State after rotation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/State"
+  /api/chores/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    patch:
+      tags: [chores]
+      summary: Change status or assignee
+      description: |
+        `status: done` sets `doneBy` to `actorId` and `doneAt` to now.
+        `status: todo` clears both. At least one of `status` or `assigneeId` must be present.
+      operationId: updateChore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChore"
+      responses:
+        "200":
+          description: The updated chore.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chore"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+    delete:
+      tags: [chores]
+      summary: Delete a chore
+      operationId: deleteChore
+      responses:
+        "204":
+          description: Deleted.
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/shopping:
+    post:
+      tags: [shopping]
+      summary: Add a shopping item
+      operationId: createShoppingItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateShoppingItem"
+      responses:
+        "201":
+          description: Item created with status `needed`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShoppingItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+  /api/shopping/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    patch:
+      tags: [shopping]
+      summary: Mark an item bought or needed
+      description: |
+        `status: bought` sets `boughtBy` to `actorId` and `boughtAt` to now.
+        `status: needed` clears both.
+      operationId: updateShoppingItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateShoppingItem"
+      responses:
+        "200":
+          description: The updated item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShoppingItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+    delete:
+      tags: [shopping]
+      summary: Delete a shopping item
+      operationId: deleteShoppingItem
+      responses:
+        "204":
+          description: Deleted.
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/reset:
+    post:
+      tags: [state]
+      summary: Reseed the demo data
+      description: Demo convenience. Replaces all chores and shopping items with the seed set.
+      operationId: resetState
+      responses:
+        "200":
+          description: The reseeded state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/State"
+  /api/events:
+    get:
+      tags: [events]
+      summary: Live state stream (Server-Sent Events)
+      description: |
+        Responds with `Content-Type: text/event-stream` and keeps the connection open.
+        On connect the server sends one `event: state` frame whose `data:` line is the full
+        State JSON, and sends the same frame again after every mutation. Every 25 seconds it
+        writes a comment line `: ping` to keep the connection alive. Clients re-render from each
+        frame; there is no diff protocol and no client-to-server channel.
+      operationId: streamEvents
+      responses:
+        "200":
+          description: Open event stream.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Frames of the form:
+
+                      event: state
+                      data: {"members":[...],"chores":[...],"shopping":[...],"week":{...},"updatedAt":"..."}
+
+                  interleaved with `: ping` comment lines.
+              example: |
+                event: state
+                data: {"members":[],"chores":[],"shopping":[],"week":{"start":"2026-10-19T00:00:00.000Z","points":{},"fairness":1},"updatedAt":"2026-10-22T08:00:00.000Z"}
+
+                : ping
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      description: Entity id (UUID issued by the server).
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+  responses:
+    BadRequest:
+      description: Malformed JSON (`bad_json`) or a field failed validation (`validation_error`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: validation_error
+              message: points must be an integer between 1 and 10
+    NotFound:
+      description: No entity with that id, or an unknown /api path.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: not_found
+              message: chore not found
+    PayloadTooLarge:
+      description: Request body exceeded 16 KB.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: payload_too_large
+              message: body must be 16 KB or smaller
+  schemas:
+    Id:
+      type: string
+      minLength: 1
+      maxLength: 64
+    Timestamp:
+      type: string
+      format: date-time
+      description: ISO 8601, UTC.
+    DueDay:
+      type: string
+      enum: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+    ChoreStatus:
+      type: string
+      enum: [todo, done]
+    ShoppingStatus:
+      type: string
+      enum: [needed, bought]
+    Member:
+      type: object
+      additionalProperties: false
+      required: [id, name, label, role, emoji, color]
+      properties:
+        id:
+          $ref: "#/components/schemas/Id"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        label:
+          type: string
+          description: Short form shown on chips, for example "Mum".
+          minLength: 1
+          maxLength: 12
+        role:
+          type: string
+          enum: [parent, child]
+        emoji:
+          type: string
+          minLength: 1
+          maxLength: 8
+        color:
+          type: string
+          description: CSS hex colour.
+          pattern: "^#[0-9a-fA-F]{6}$"
+    Chore:
+      type: object
+      additionalProperties: false
+      required: [id, title, assigneeId, points, dueDay, status, doneBy, doneAt, createdAt]
+      properties:
+        id:
+          $ref: "#/components/schemas/Id"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 60
+        assigneeId:
+          $ref: "#/components/schemas/Id"
+        points:
+          type: integer
+          minimum: 1
+          maximum: 10
+        dueDay:
+          $ref: "#/components/schemas/DueDay"
+        status:
+          $ref: "#/components/schemas/ChoreStatus"
+        doneBy:
+          description: Member who ticked it, or null while `todo`.
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        doneAt:
+          description: When it was ticked, or null while `todo`.
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"
+    ShoppingItem:
+      type: object
+      additionalProperties: false
+      required: [id, name, qty, addedBy, status, boughtBy, createdAt, boughtAt]
+      properties:
+        id:
+          $ref: "#/components/schemas/Id"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        qty:
+          description: Free-text quantity such as "2 L", or null.
+          oneOf:
+            - type: string
+              minLength: 0
+              maxLength: 20
+            - type: "null"
+        addedBy:
+          $ref: "#/components/schemas/Id"
+        status:
+          $ref: "#/components/schemas/ShoppingStatus"
+        boughtBy:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"
+        boughtAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+    Week:
+      type: object
+      additionalProperties: false
+      required: [start, points, fairness]
+      description: |
+        Derived on every read. The week runs Monday 00:00 to Sunday 23:59 local time.
+        `points` sums the points of chores with status `done` and `doneAt` in the current week,
+        credited to `doneBy`; every member has a key and starts at 0.
+        `fairness` is lowest divided by highest weekly points, and 1 when all are equal or all zero.
+      properties:
+        start:
+          $ref: "#/components/schemas/Timestamp"
+        points:
+          type: object
+          description: Map of memberId to weekly points.
+          additionalProperties:
+            type: integer
+            minimum: 0
+        fairness:
+          type: number
+          minimum: 0
+          maximum: 1
+    State:
+      type: object
+      additionalProperties: false
+      required: [members, chores, shopping, week, updatedAt]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/Member"
+        chores:
+          type: array
+          items:
+            $ref: "#/components/schemas/Chore"
+        shopping:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShoppingItem"
+        week:
+          $ref: "#/components/schemas/Week"
+        updatedAt:
+          $ref: "#/components/schemas/Timestamp"
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [bad_json, validation_error, not_found, payload_too_large, internal]
+            message:
+              type: string
+              maxLength: 200
+    CreateChore:
+      type: object
+      additionalProperties: false
+      required: [title, assigneeId, points, dueDay]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 60
+        assigneeId:
+          $ref: "#/components/schemas/Id"
+        points:
+          type: integer
+          minimum: 1
+          maximum: 10
+        dueDay:
+          $ref: "#/components/schemas/DueDay"
+    UpdateChore:
+      type: object
+      additionalProperties: false
+      required: [actorId]
+      minProperties: 2
+      properties:
+        status:
+          $ref: "#/components/schemas/ChoreStatus"
+        assigneeId:
+          $ref: "#/components/schemas/Id"
+        actorId:
+          description: Member performing the change; recorded as `doneBy` when status becomes `done`.
+          allOf:
+            - $ref: "#/components/schemas/Id"
+    CreateShoppingItem:
+      type: object
+      additionalProperties: false
+      required: [name, actorId]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        qty:
+          oneOf:
+            - type: string
+              minLength: 0
+              maxLength: 20
+            - type: "null"
+        actorId:
+          description: Member adding the item; recorded as `addedBy`.
+          allOf:
+            - $ref: "#/components/schemas/Id"
+    UpdateShoppingItem:
+      type: object
+      additionalProperties: false
+      required: [status, actorId]
+      properties:
+        status:
+          $ref: "#/components/schemas/ShoppingStatus"
+        actorId:
+          description: Member performing the change; recorded as `boughtBy` when status becomes `bought`.
+          allOf:
+            - $ref: "#/components/schemas/Id"

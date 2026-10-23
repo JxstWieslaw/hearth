@@ -1,0 +1,3 @@
+# Runtime JSON store: never commit household data
+data/
+node_modules/
