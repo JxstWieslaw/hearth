@@ -77,7 +77,7 @@ bodies that are not JSON get 415. Add extra hostnames with `HEARTH_ALLOWED_HOSTS
 ## Hosted demo (Vercel)
 
 The same code runs on Vercel as a public demo. `public/` is served as static files and every
-`/api/*` request goes to one function, `api/[...path].mjs`, which wraps the same app the local
+`/api/*` request goes to one function, `api/hearth.mjs` (vercel.json rewrites `/api/*` to it), which wraps the same app the local
 server runs. Config lives in `vercel.json` (region `cpt1`, Cape Town).
 
 What differs from the home setup, on purpose:

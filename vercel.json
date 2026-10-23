@@ -3,7 +3,10 @@
   "framework": null,
   "outputDirectory": "public",
   "regions": ["cpt1"],
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/hearth?path=:path*" }
+  ],
   "functions": {
-    "api/[...path].mjs": { "maxDuration": 300 }
+    "api/hearth.mjs": { "maxDuration": 300 }
   }
 }

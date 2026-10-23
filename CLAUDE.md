@@ -11,7 +11,7 @@ Household operating board for a family of five. Zero-dependency Node 22, vanilla
 - `server.mjs`: HTTP app (`createApp` returns `{ server, shutdown, handle }`), routes, SSE, guard
 - `lib/store.mjs`: in-memory state, atomic JSON persistence, pure fairness functions
 - `lib/validate.mjs`: hand-rolled validators
-- `public/`: static UI; `api/[...path].mjs`: Vercel entry point; `vercel.json`: hosting config
+- `public/`: static UI; `api/hearth.mjs` (vercel.json rewrites `/api/*` to it): Vercel entry point; `vercel.json`: hosting config
 - `docs/SPEC.md` and `openapi.yaml`: the spec and API contract; keep them in step with the code
 
 ## Conventions
